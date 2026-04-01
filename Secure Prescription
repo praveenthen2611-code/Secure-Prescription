@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Smart Secure QR Prescription</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+
+<style>
+body { font-family: Arial; text-align: center; padding: 20px; }
+button { margin: 5px; padding: 10px; background: green; color: white; border: none; border-radius: 6px; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+th, td { border: 1px solid black; padding: 8px; text-align: center; }
+canvas { border: 1px solid black; }
+.history { border:1px solid gray; margin:10px; padding:10px; }
+</style>
+</head>
+
+<body>
+
+<h2>🔐 Login</h2>
+<input type="password" id="passwordInput"/>
+<button onclick="login()">Login</button>
+<p id="authStatus"></p>
+
+<div id="app" style="pointer-events:none;opacity:0.5;">
+
+<h2>🎤 Voice QR Prescription</h2>
+
+<button onclick="voice('name')">Speak Name</button>
+<p id="nameText"></p>
+
+<button onclick="voice('age')">Speak Age</button>
+<p id="ageText"></p>
+
+<button onclick="voice('symptoms')">Speak Symptoms</button>
+<p id="symptomsText"></p>
+
+<h3>Medicines</h3>
+<div id="medSection"></div>
+
+<h3>Tablet Schedule</h3>
+<table id="table">
+<tr>
+<th>Medicine</th>
+<th>Morning</th>
+<th>Afternoon</th>
+<th>Evening</th>
+<th>Night</th>
+<th>Before Food</th>
+<th>After Food</th>
+</tr>
+</table>
+
+<h3>Signature</h3>
+<canvas id="pad" width="300" height="100"></canvas><br>
+<button onclick="clearPad()">Clear</button>
+
+<h3>Actions</h3>
+<button onclick="generateQR()">QR Code</button>
+<button onclick="generatePDF()">Save PDF</button>
+<button onclick="shareWhatsApp()">WhatsApp</button>
+<button onclick="shareEmail()">Email</button>
+<button onclick="saveHistory()">Save History</button>
+
+<div id="qr"></div>
+
+<h3>📜 History</h3>
+<button onclick="loadHistory()">Show History</button>
+<div id="history"></div>
+
+</div>
+
+<script>
+const PASS="1234";
+
+let data={name:"",age:"",symptoms:"",meds:["","","","",""],times:["","","","",""],signature:""};
+
+// 🔐 Login
+function login(){
+if(passwordInput.value===PASS){
+authStatus.innerText="Login success";
+app.style.pointerEvents="auto";
+app.style.opacity="1";
+createInputs();
+}else authStatus.innerText="Wrong password";
+}
+
+// Medicine inputs
+function createInputs(){
+let sec=document.getElementById("medSection");
+sec.innerHTML="";
+for(let i=1;i<=5;i++){
+sec.innerHTML+=`
+<button onclick="medVoice(${i})">Medicine ${i}</button>
+<p id="m${i}"></p>
+<button onclick="timeVoice(${i})">Time ${i}</button>
+<p id="t${i}"></p>`;
+}
+}
+
+// Voice input
+function voice(field){
+let r=new(webkitSpeechRecognition)();
+r.onresult=e=>{
+data[field]=e.results[0][0].transcript;
+document.getElementById(field+"Text").innerText=data[field];
+};
+r.start();
+}
+
+function medVoice(i){
+let r=new(webkitSpeechRecognition)();
+r.onresult=e=>{
+data.meds[i-1]=e.results[0][0].transcript;
+document.getElementById("m"+i).innerText=data.meds[i-1];
+fillTable();
+};
+r.start();
+}
+
+function timeVoice(i){
+let r=new(webkitSpeechRecognition)();
+r.onresult=e=>{
+data.times[i-1]=e.results[0][0].transcript.toLowerCase();
+document.getElementById("t"+i).innerText=data.times[i-1];
+fillTable();
+};
+r.start();
+}
+
+// Fill table
+function fillTable(){
+let table=document.getElementById("table");
+while(table.rows.length>1)table.deleteRow(1);
+
+data.meds.forEach((m,i)=>{
+if(!m)return;
+let row=table.insertRow();
+row.insertCell(0).innerText=m;
+
+["morning","afternoon","evening","night","before food","after food"]
+.forEach(t=>{
+let checked=(data.times[i]||"").includes(t)?"checked":"";
+let cell=row.insertCell();
+cell.innerHTML=`<input type="checkbox" data-time="${t}" ${checked}>`;
+});
+});
+}
+
+// Read table
+function getTable(){
+let table=document.getElementById("table");
+let res=[];
+for(let i=1;i<table.rows.length;i++){
+let row=table.rows[i];
+let med=row.cells[0].innerText;
+let times=[];
+for(let j=1;j<=6;j++){
+let cb=row.cells[j].querySelector("input");
+if(cb.checked)times.push(cb.dataset.time);
+}
+res.push({medicine:med,times});
+}
+return res;
+}
+
+// Get text
+function getText(){
+let t=getTable();
+return `Prescription
+Name: ${data.name}
+Age: ${data.age}
+Symptoms: ${data.symptoms}
+
+` + t.map(d=>d.medicine+" "+d.times.join(",")).join("\n");
+}
+
+// QR
+function generateQR(){
+document.getElementById("qr").innerHTML="";
+new QRCode(document.getElementById("qr"),getText());
+}
+
+// PDF
+function generatePDF(){
+const {jsPDF}=window.jspdf;
+let doc=new jsPDF();
+
+doc.text("Prescription",80,10);
+doc.text("Name: "+data.name,10,20);
+doc.text("Age: "+data.age,10,30);
+doc.text("Symptoms: "+data.symptoms,10,40);
+
+let t=getTable();
+
+let body=t.map(d=>{
+return [
+d.medicine,
+d.times.includes("morning")?"✔":"",
+d.times.includes("afternoon")?"✔":"",
+d.times.includes("evening")?"✔":"",
+d.times.includes("night")?"✔":"",
+d.times.includes("before food")?"✔":"",
+d.times.includes("after food")?"✔":""
+];
+});
+
+doc.autoTable({
+head:[["Medicine","Morning","Afternoon","Evening","Night","Before Food","After Food"]],
+body:body,
+startY:50
+});
+
+if(data.signature){
+doc.addImage(data.signature,"PNG",60,doc.lastAutoTable.finalY+10,60,20);
+}
+
+doc.save("Prescription.pdf");
+}
+
+// WhatsApp
+function shareWhatsApp(){
+window.open("https://wa.me/?text="+encodeURIComponent(getText()));
+}
+
+// Email
+function shareEmail(){
+window.location.href="mailto:?subject=Prescription&body="+encodeURIComponent(getText());
+}
+
+// Save History
+function saveHistory(){
+let history=JSON.parse(localStorage.getItem("prescriptions")||"[]");
+history.push(getText());
+localStorage.setItem("prescriptions",JSON.stringify(history));
+alert("Saved!");
+}
+
+// Load History
+function loadHistory(){
+let history=JSON.parse(localStorage.getItem("prescriptions")||"[]");
+let div=document.getElementById("history");
+div.innerHTML="";
+history.reverse().forEach(h=>{
+div.innerHTML+=`<div class="history">${h}</div>`;
+});
+}
+
+// Signature
+const canvas=document.getElementById("pad");
+const ctx=canvas.getContext("2d");
+let draw=false;
+
+canvas.onmousedown=()=>draw=true;
+canvas.onmouseup=()=>{draw=false;data.signature=canvas.toDataURL();};
+canvas.onmousemove=e=>{
+if(!draw)return;
+ctx.lineWidth=2;
+ctx.lineTo(e.offsetX,e.offsetY);
+ctx.stroke();
+ctx.beginPath();
+ctx.moveTo(e.offsetX,e.offsetY);
+};
+
+function clearPad(){
+ctx.clearRect(0,0,300,100);
+data.signature="";
+}
+</script>
+
+</body>
+</html>
